@@ -40,12 +40,15 @@ class SDFWorld:
 
 
 class MeshCatObject:
-    def __init__(self, vis, name):
+    def __init__(self, vis, name, visualize=True):
         self.vis = vis
         self.name = name
         self.handle = self.vis[name]
         self.handle.delete()
         self.pose: SE3 = SE3.identity()
+        self.visualize = visualize
+        if self.visualize:
+            self.load()
     
     def load(self):
         raise NotImplementedError()
@@ -74,13 +77,12 @@ class MeshCatObject:
         self.set_pose(self.pose)
 
 class Box(MeshCatObject, SDFBox):
-    def __init__(self, vis, name, lengths, color=None, alpha=1.):
+    def __init__(self, vis, name, lengths, color=None, alpha=1., visualize=True):
         assert len(lengths) == 3
-        super().__init__(vis=vis, name=name)
         self.lengths = np.array(lengths)
         self.color = Colors.read(color)
         self.alpha = alpha
-        self.load()
+        super().__init__(vis=vis, name=name, visualize=visualize)
 
     def load(self):
         obj = g.Box(self.lengths)
@@ -97,12 +99,11 @@ class Box(MeshCatObject, SDFBox):
         return task_space_potential(d, safe_dist)
 
 class Sphere(MeshCatObject, SDFSphere):
-    def __init__(self, vis, name, r, color=None, alpha=1.):
-        super().__init__(vis=vis, name=name)
+    def __init__(self, vis, name, r, color=None, alpha=1., visualize=True):
         self.r = r
         self.color = Colors.read(color)
         self.alpha = alpha
-        self.load()
+        super().__init__(vis=vis, name=name, visualize=visualize)
 
     def load(self):
         obj = g.Sphere(self.r)
@@ -124,12 +125,11 @@ class Sphere(MeshCatObject, SDFSphere):
 
 class Mesh(MeshCatObject):
     def __init__(self, vis, name, path):
-        super().__init__(vis=vis, name=name)
         self.path = path
         self.mesh = trimesh.load(path)
         if isinstance(self.mesh, trimesh.Scene):
             self.mesh = self.mesh.dump(True)
-        self.load()
+        super().__init__(vis=vis, name=name)
 
     def load(self):
         exp_obj = trimesh.exchange.obj.export_obj(self.mesh)
@@ -140,10 +140,9 @@ class Mesh(MeshCatObject):
 
 class Frame(MeshCatObject):
     def __init__(self, vis, name, length=0.1, r=0.02):
-        super().__init__(vis=vis, name=name)
         self.length = length
         self.r = r
-        self.load()
+        super().__init__(vis=vis, name=name, visualize=True)
     
     def load(self):
         axes = ["x", "y", "z"]
@@ -161,12 +160,14 @@ class Frame(MeshCatObject):
 class PointCloud(MeshCatObject):
     def __init__(self, vis, name, points, size=0.05, color="white"):
         """points(n, 3)"""
-        super().__init__(vis=vis, name=name)
         length = points.shape[0]
         self.points = np.array(points)
-        self.color = np.tile(Colors.read(color, return_rgb=True), length).reshape(-1, 3)
+        if isinstance(color, str):
+            self.color = np.tile(Colors.read(color, return_rgb=True), length).reshape(-1, 3)
+        else:
+            self.color = color
         self.size = size
-        self.load()
+        super().__init__(vis=vis, name=name, visualize=True)
 
     def load(self):
         obj = g.PointsGeometry(self.points.T, self.color.T)

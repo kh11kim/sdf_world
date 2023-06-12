@@ -18,6 +18,7 @@ from .util import *
 
 PANDA_PACKAGE = Path(__file__).parent / "assets/robots/panda"
 PANDA_URDF = PANDA_PACKAGE / "franka_panda.urdf"
+HAND_URDF = PANDA_PACKAGE / "hand.urdf"
 
 class Link:
     def __init__(self, name, xyz=None, rpy=None, visual_mesh=None, collision_mesh=None, package=None):
@@ -219,11 +220,11 @@ class RobotModel:
         def get_robot_surface_points(q):
             to_mat = lambda wxyzxyz: SE3(wxyzxyz).as_matrix()
             points = []
-            Ts = jax.vmap(to_mat)(fk(q)) #vector wxyz_xyz
-            for T, link in zip(Ts, self.links.values()):
+            fks = self.fk_fn(q) #vector wxyz_xyz
+            for wxyzxyz, link in zip(fks, self.links.values()):
                 if not link.has_mesh: continue
                 if not self.is_floating and link == self.root_link: continue
-                assigned_surface_points = jax.vmap(SE3(T).apply)(
+                assigned_surface_points = jax.vmap(SE3(wxyzxyz).apply)(
                     link.surface_points
                 )
                 points.append(assigned_surface_points)
@@ -245,7 +246,6 @@ class RobotModel:
 class Robot(MeshCatObject):
     def __init__(
             self, vis, name, model:RobotModel, color="white", alpha=1., show_surface_points=False):
-        super().__init__(vis, name)
         self.model = model
         self.fk_to_mat = jax.jit(jax.vmap(lambda wxyzxyz: SE3(wxyzxyz).as_matrix()))
         self.full_idx = np.arange(self.model.dof)
@@ -259,7 +259,7 @@ class Robot(MeshCatObject):
         self.color = Colors.read(color)
         self.alpha = alpha
         self.q = self.neutral
-        self.load()
+        super().__init__(vis, name)
         self.set_joint_angles(self.q)
 
     def load(self):

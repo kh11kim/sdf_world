@@ -131,3 +131,16 @@ def save(path, state:TrainState, hp:Hyperparam, force=False):
 def load(path):
     orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
     return orbax_checkpointer.restore(path)
+
+class ManipNet(nn.Module):
+    hidden_dim: int
+    @nn.compact
+    def __call__(self, x):
+        x = nn.Dense(features=self.hidden_dim)(x)
+        x = nn.relu(x)
+        x = nn.Dense(features=self.hidden_dim)(x)
+        x = nn.relu(x)
+        x = nn.Dense(features=self.hidden_dim)(x)
+        x = nn.relu(x)
+        x = nn.Dense(features=1)(x)
+        return nn.softplus(x)
