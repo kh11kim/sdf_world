@@ -144,3 +144,16 @@ class ManipNet(nn.Module):
         x = nn.relu(x)
         x = nn.Dense(features=1)(x)
         return nn.softplus(x)
+
+class GraspNet(nn.Module):
+    hidden_dim: int
+    @nn.compact
+    def __call__(self, x):
+        x = nn.Dense(features=self.hidden_dim)(x)
+        x = nn.relu(x)
+        x = nn.Dense(features=self.hidden_dim)(x)
+        x = nn.relu(x)
+        x = nn.Dense(features=self.hidden_dim)(x)
+        x = nn.relu(x)
+        logit = nn.Dense(features=5)(x)
+        return logit

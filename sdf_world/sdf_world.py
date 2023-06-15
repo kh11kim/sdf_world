@@ -77,16 +77,16 @@ class MeshCatObject:
         self.set_pose(self.pose)
 
 class Box(MeshCatObject, SDFBox):
-    def __init__(self, vis, name, lengths, color=None, alpha=1., visualize=True):
+    def __init__(self, vis, name, lengths, color="white", alpha=1., visualize=True):
         assert len(lengths) == 3
         self.lengths = np.array(lengths)
-        self.color = Colors.read(color)
+        self.color = color
         self.alpha = alpha
         super().__init__(vis=vis, name=name, visualize=visualize)
 
     def load(self):
         obj = g.Box(self.lengths)
-        material = g.MeshLambertMaterial(color=self.color, opacity=self.alpha)
+        material = g.MeshLambertMaterial(color=Colors.read(self.color), opacity=self.alpha)
         self.handle.set_object(obj, material)
     
     def reshape(self, lengths):
@@ -99,24 +99,24 @@ class Box(MeshCatObject, SDFBox):
         return task_space_potential(d, safe_dist)
 
 class Sphere(MeshCatObject, SDFSphere):
-    def __init__(self, vis, name, r, color=None, alpha=1., visualize=True):
+    def __init__(self, vis, name, r, color="white", alpha=1., visualize=True):
         self.r = r
-        self.color = Colors.read(color)
+        self.color = color
         self.alpha = alpha
         super().__init__(vis=vis, name=name, visualize=visualize)
 
     def load(self):
         obj = g.Sphere(self.r)
-        material = g.MeshLambertMaterial(color=self.color, opacity=self.alpha)
+        material = g.MeshLambertMaterial(color=Colors.read(self.color), opacity=self.alpha)
         self.handle.set_object(obj, material)
     
-    def reshape(self, **config):
-        for name, value in config.items():
-            if name in dir(self):
-                setattr(self, name, value)
-        self.handle.delete()
-        self.load()
-        self.set_pose(self.pose)
+    # def reshape(self, **config):
+    #     for name, value in config.items():
+    #         if name in dir(self):
+    #             setattr(self, name, value)
+    #     self.handle.delete()
+    #     self.load()
+    #     self.set_pose(self.pose)
     
     def penetration(self, point, safe_dist):
         center = self.pose.translation()
@@ -124,9 +124,11 @@ class Sphere(MeshCatObject, SDFSphere):
         return task_space_potential(d, safe_dist)
 
 class Mesh(MeshCatObject):
-    def __init__(self, vis, name, path):
+    def __init__(self, vis, name, path, color="white", alpha=1.):
         self.path = path
         self.mesh = trimesh.load(path)
+        self.color = color
+        self.alpha = alpha
         if isinstance(self.mesh, trimesh.Scene):
             self.mesh = self.mesh.dump(True)
         super().__init__(vis=vis, name=name)
@@ -135,7 +137,9 @@ class Mesh(MeshCatObject):
         exp_obj = trimesh.exchange.obj.export_obj(self.mesh)
         obj = g.ObjMeshGeometry.from_stream(
             trimesh.util.wrap_as_stream(exp_obj))
-        self.vis[self.name].set_object(obj)
+        material = g.MeshLambertMaterial(
+            color=Colors.read(self.color), opacity=self.alpha)
+        self.vis[self.name].set_object(obj, material)
 
 
 class Frame(MeshCatObject):

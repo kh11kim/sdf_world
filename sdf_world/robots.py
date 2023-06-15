@@ -280,7 +280,7 @@ class Robot(MeshCatObject):
             i += 1
         self.handle["surface_points"].delete()
         if self.show_surface_points:
-            surface_points = self.model.get_surface_points(self.q).T
+            surface_points = self.model.get_surface_points_fn(self.q).T
             colors = np.tile(
                 Colors.read("red",return_rgb=True), 
                 surface_points.shape[1]).reshape(-1, 3).T
