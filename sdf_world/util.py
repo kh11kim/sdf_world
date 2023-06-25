@@ -136,3 +136,6 @@ def to_cartesian_coord(r_theta_phi):
     y = r*jnp.sin(theta)*jnp.sin(phi)
     z = r*jnp.cos(theta)
     return jnp.array([x,y,z])
+
+def point_to_T(p):
+    return np.array(SE3.from_translation(p).as_matrix(), dtype=float)

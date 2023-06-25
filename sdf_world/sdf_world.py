@@ -12,6 +12,8 @@ from .util import *
 from .sdf import *
 
 
+
+
 class SDFWorld:
     def __init__(self):
         self.vis = meshcat.Visualizer()
@@ -89,17 +91,12 @@ class Box(MeshCatObject, SDFBox):
         material = g.MeshLambertMaterial(color=Colors.read(self.color), opacity=self.alpha)
         self.handle.set_object(obj, material)
     
-    def reshape(self, lengths):
-        self.lengths = np.array(lengths)
-        self.handle.delete()
-        self.load()
-    
     def penetration(self, point, safe_dist):
         d = self.distance(point, self.pose, self.lengths/2)
         return task_space_potential(d, safe_dist)
 
 class Sphere(MeshCatObject, SDFSphere):
-    def __init__(self, vis, name, r, color="white", alpha=1., visualize=True):
+    def __init__(self, vis, name, r, color="red", alpha=1., visualize=True):
         self.r = r
         self.color = color
         self.alpha = alpha
@@ -110,18 +107,57 @@ class Sphere(MeshCatObject, SDFSphere):
         material = g.MeshLambertMaterial(color=Colors.read(self.color), opacity=self.alpha)
         self.handle.set_object(obj, material)
     
-    # def reshape(self, **config):
-    #     for name, value in config.items():
-    #         if name in dir(self):
-    #             setattr(self, name, value)
-    #     self.handle.delete()
-    #     self.load()
-    #     self.set_pose(self.pose)
-    
     def penetration(self, point, safe_dist):
         center = self.pose.translation()
         d = self.distance(point, center, self.r)
         return task_space_potential(d, safe_dist)
+
+class Cylinder(MeshCatObject):
+    def __init__(self, vis, name, h, r, color="red", alpha=1., visualize=True):
+        self.h = h
+        self.r = r
+        self.color = color
+        self.alpha = alpha
+        super().__init__(vis=vis, name=name, visualize=visualize)
+
+    def load(self):
+        obj = g.Cylinder(height=self.h, radius=self.r)
+        material = g.MeshLambertMaterial(color=Colors.read(self.color), opacity=self.alpha)
+        self.handle.set_object(obj, material)
+    
+
+class Capsule(MeshCatObject):
+    def __init__(self, vis, name, p1, p2, r, color="red", alpha=1., visualize=True):
+        self.p1 = p1
+        self.p2 = p2
+        self.r = r
+        self.color = color
+        self.alpha = alpha
+        super().__init__(vis=vis, name=name, visualize=visualize)
+
+    def load(self):
+        normalize = lambda v: v/jnp.linalg.norm(v)
+        obj_sphere1 = g.Sphere(self.r)
+        obj_sphere2 = g.Sphere(self.r)
+        h = jnp.linalg.norm(self.p1 - self.p2).item()
+        yaxis = normalize(self.p2 - self.p1)
+        zaxis = jnp.array([0, 0.1, 1.13])  #random
+        xaxis = normalize(jnp.cross(yaxis, zaxis))
+        zaxis = normalize(jnp.cross(xaxis, yaxis))
+        R = jnp.vstack([xaxis, yaxis, zaxis]).T
+        center = (self.p1 + self.p2) / 2
+        cylinder_pose = SE3.from_rotation_and_translation(SO3.from_matrix(R), center)
+        T = np.array(cylinder_pose.as_matrix())
+        obj_cylinder = g.Cylinder(height=h, radius=self.r)
+        material = g.MeshLambertMaterial(color=Colors.read(self.color), opacity=self.alpha)
+        self.handle["sphere1"].set_object(obj_sphere1, material)
+        self.handle["sphere2"].set_object(obj_sphere2, material)
+        self.handle["cylinder"].set_object(obj_cylinder, material)
+        
+        self.handle["sphere1"].set_transform(point_to_T(self.p1))
+        self.handle["sphere2"].set_transform(point_to_T(self.p2))
+        self.handle["cylinder"].set_transform(T.astype(float))
+
 
 class Mesh(MeshCatObject):
     def __init__(self, vis, name, path, color="white", alpha=1.):
@@ -177,5 +213,22 @@ class PointCloud(MeshCatObject):
         obj = g.PointsGeometry(self.points.T, self.color.T)
         material = g.PointsMaterial(size=self.size)
         self.handle["pc"].set_object(obj, material)
-        
-        
+
+class DottedLine(MeshCatObject):
+    def __init__(self, vis, name, points, point_size=0.01, color:str="red"):
+        """points(n, 3)"""
+        length = points.shape[0]
+        self.points = np.array(points)
+        self.color = Colors.read("red")
+        self.colors = np.tile(Colors.read(color, return_rgb=True), length).reshape(-1, 3)
+        self.size = point_size
+        super().__init__(vis=vis, name=name, visualize=True)
+
+    def load(self):
+        point_obj = g.PointsGeometry(self.points.T, self.colors.T)
+        line_material = g.MeshBasicMaterial(color=self.color)
+        point_material = g.PointsMaterial(size=0.02)
+        self.handle["line"].set_object(
+            g.Line(point_obj, line_material)
+        )
+        self.handle["dot"].set_object(point_obj, point_material)
