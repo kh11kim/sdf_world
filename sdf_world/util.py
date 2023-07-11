@@ -139,3 +139,10 @@ def to_cartesian_coord(r_theta_phi):
 
 def point_to_T(p):
     return np.array(SE3.from_translation(p).as_matrix(), dtype=float)
+
+def value_and_jacrev(f, x, state):
+    y, pullback = jax.vjp(f, x, state)
+    basis = jnp.eye(y.size, dtype=y.dtype)
+    jac = jax.vmap(pullback)(basis)
+    return y, jac[0]
+

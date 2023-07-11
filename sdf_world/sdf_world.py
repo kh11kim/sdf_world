@@ -111,6 +111,11 @@ class Sphere(MeshCatObject, SDFSphere):
         center = self.pose.translation()
         d = self.distance(point, center, self.r)
         return task_space_potential(d, safe_dist)
+    
+    def sdf(self, point):
+        center = self.pose.translation()
+        d = self.distance(point, center, self.r)
+        return d
 
 class Cylinder(MeshCatObject):
     def __init__(self, vis, name, h, r, color="red", alpha=1., visualize=True):
