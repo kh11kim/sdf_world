@@ -17,9 +17,10 @@ from .sdf import *
 class SDFWorld:
     def __init__(self):
         self.vis = meshcat.Visualizer()
-        bg = self.vis["/Background"]
-        bg.set_property("bottom_color", [0.1, 0.1, 0.1])
-        bg.set_property("top_color", [0.1, 0.1, 0.1])
+        self.vis["/Background"].set_property("top_color", [0.2]*3)
+        self.vis["/Background"].set_property("bottom_color", [0.2]*3)
+        self.vis["/Lights/SpotLight"].set_property("visible", True)
+        self.vis["/Lights/AmbientLight"].set_property("visible", False)
         self.bodies = {}
 
     def show_in_jupyter(self, height=400):
@@ -92,8 +93,11 @@ class Box(MeshCatObject, SDFBox):
         self.handle.set_object(obj, material)
     
     def penetration(self, point, safe_dist):
-        d = self.distance(point, self.pose, self.lengths/2)
+        d = self._distance(point, self.pose, self.lengths/2)
         return task_space_potential(d, safe_dist)
+    
+    def sdf(self, point):
+        return self._distance(point, self.pose, self.lengths/2)
 
 class Sphere(MeshCatObject, SDFSphere):
     def __init__(self, vis, name, r, color="red", alpha=1., visualize=True):
@@ -109,12 +113,12 @@ class Sphere(MeshCatObject, SDFSphere):
     
     def penetration(self, point, safe_dist):
         center = self.pose.translation()
-        d = self.distance(point, center, self.r)
+        d = self._distance(point, center, self.r)
         return task_space_potential(d, safe_dist)
     
     def sdf(self, point):
         center = self.pose.translation()
-        d = self.distance(point, center, self.r)
+        d = self._distance(point, center, self.r)
         return d
 
 class Cylinder(MeshCatObject):

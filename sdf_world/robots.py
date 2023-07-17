@@ -35,7 +35,7 @@ class Link:
             self.collision_mesh_path = self.get_mesh_path(collision_mesh, package)
             self.visual_mesh = self.load_mesh(self.visual_mesh_path)
             self.collision_mesh = self.load_mesh(self.collision_mesh_path)
-            self.surface_points = farthest_point_sampling(self.collision_mesh.sample(100), 20)
+            self.set_surface_points(20)
 
     @property
     def has_mesh(self):
@@ -51,6 +51,9 @@ class Link:
             # print(f"merging mesh scene: {path}")
             mesh = mesh.dump(True)
         return mesh
+    
+    def set_surface_points(self, num):
+        self.surface_points = farthest_point_sampling(self.collision_mesh.sample(num*50), num)
     
     def get_meshcat_obj(self, type="visual"):
         if type == "visual":
@@ -230,10 +233,6 @@ class RobotModel:
                 points.append(assigned_surface_points)
             return jnp.vstack(points)
         self.get_surface_points_fn = jax.jit(get_robot_surface_points)
-        # fk_mat = lambda q: jax.vmap(to_mat)(fk(q))
-        # self.fk = jax.jit(self.fk_mat_fn).lower(jnp.zeros(self.dof)).compile()
-        # self.get_surface_points = \
-        #     jax.jit(self.get_surface_points_fn).lower(jnp.zeros(self.dof)).compile()
 
 
     def get_root_link(self, link:Link):

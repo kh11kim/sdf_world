@@ -29,19 +29,19 @@ def task_space_potential(d, safe_dist):
 
 #@jdc.pytree_dataclass
 class SDF:
-    def distance(self, point):
+    def _distance(self, point):
         raise NotImplementedError
     def penetration(self, point, safe_dist):
         raise NotImplementedError
     
 #@jdc.pytree_dataclass
 class SDFSphere(SDF):
-    def distance(self, point, center, r):
+    def _distance(self, point, center, r):
         return safe_2norm(point - center) - r
 
 #@jdc.pytree_dataclass
 class SDFBox(SDF):
-    def distance(self, point, box_pose:SE3, half_extents:Array):
+    def _distance(self, point, box_pose:SE3, half_extents:Array):
         point = box_pose.inverse().apply(point)
         q = jnp.abs(point) - half_extents
         return safe_2norm(jnp.maximum(q, 0)) + \
@@ -54,12 +54,16 @@ class SDFContainer:
         self.sdfs = sdfs
         self.safe_dist = safe_dist
     
-    # def distance(self, point):
-    #     min_dist = jnp.inf
-    #     for sdf in self.sdfs:
-    #         min_dist = jnp.minimum(min_dist, sdf.distance(point))
-    #     return min_dist
+    def distances(self, points):
+        signed_distances = []
+        for sdf in self.sdfs:
+            signed_distances.append(jax.vmap(sdf.sdf)(points))
+        return jnp.vstack(signed_distances).min(axis=0)
     
+    # def distances(self, points):
+    #     signed_distances = []
+    #     for sdf in self.sdfs:
+
     def penetration(self, point):
         max_penet = 0.
         for sdf in self.sdfs:

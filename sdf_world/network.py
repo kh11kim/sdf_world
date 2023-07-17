@@ -155,5 +155,5 @@ class GraspNet(nn.Module):
         x = nn.relu(x)
         x = nn.Dense(features=self.hidden_dim)(x)
         x = nn.relu(x)
-        logit = nn.Dense(features=5)(x)
+        logit = nn.Dense(features=6)(x)
         return logit
