@@ -54,6 +54,12 @@ class SDFContainer:
         self.sdfs = sdfs
         self.safe_dist = safe_dist
     
+    def distance(self, point):
+        signed_distances = []
+        for sdf in self.sdfs:
+            signed_distances.append(sdf.sdf(point))
+        return jnp.vstack(signed_distances).min(axis=0)[0]
+    
     def distances(self, points):
         signed_distances = []
         for sdf in self.sdfs:

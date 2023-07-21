@@ -209,17 +209,22 @@ class Frame(MeshCatObject):
 class PointCloud(MeshCatObject):
     def __init__(self, vis, name, points, size=0.05, color="white"):
         """points(n, 3)"""
-        length = points.shape[0]
+        # length = points.shape[0]
         self.points = np.array(points)
-        if isinstance(color, str):
-            self.color = np.tile(Colors.read(color, return_rgb=True), length).reshape(-1, 3)
-        else:
-            self.color = color
+        self.color = color    
         self.size = size
         super().__init__(vis=vis, name=name, visualize=True)
 
+    def get_color(self, length):
+        if isinstance(self.color, str):
+            color_arr = np.tile(Colors.read(self.color, return_rgb=True), length).reshape(-1, 3)
+        else:
+            color_arr = self.color
+        return color_arr
+    
     def load(self):
-        obj = g.PointsGeometry(self.points.T, self.color.T)
+        color = self.get_color(self.points.shape[0])
+        obj = g.PointsGeometry(self.points.T, color.T)
         material = g.PointsMaterial(size=self.size)
         self.handle["pc"].set_object(obj, material)
 
