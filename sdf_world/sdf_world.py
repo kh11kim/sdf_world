@@ -233,15 +233,23 @@ class DottedLine(MeshCatObject):
         """points(n, 3)"""
         length = points.shape[0]
         self.points = np.array(points)
-        self.color = Colors.read("red")
-        self.colors = np.tile(Colors.read(color, return_rgb=True), length).reshape(-1, 3)
+        self.color = color
+        #self.colors = np.tile(Colors.read(color, return_rgb=True), length).reshape(-1, 3)
         self.size = point_size
         super().__init__(vis=vis, name=name, visualize=True)
 
+    def get_color(self, length):
+        if isinstance(self.color, str):
+            color_arr = np.tile(Colors.read(self.color, return_rgb=True), length).reshape(-1, 3)
+        else:
+            color_arr = self.color
+        return color_arr
+    
     def load(self):
-        point_obj = g.PointsGeometry(self.points.T, self.colors.T)
-        line_material = g.MeshBasicMaterial(color=self.color)
-        point_material = g.PointsMaterial(size=0.02)
+        colors = self.get_color(self.points.shape[0])
+        point_obj = g.PointsGeometry(self.points.T, colors.T)
+        line_material = g.MeshBasicMaterial(color=Colors.read(self.color))
+        point_material = g.PointsMaterial(size=self.size)
         self.handle["line"].set_object(
             g.Line(point_obj, line_material)
         )
