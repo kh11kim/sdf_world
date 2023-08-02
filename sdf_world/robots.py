@@ -58,6 +58,8 @@ class Link:
     def get_meshcat_obj(self, type="visual"):
         if type == "visual":
             mesh = self.visual_mesh
+        elif type == "collision":
+            mesh = self.collision_mesh
         else:
             raise NotImplementedError("visual mesh only")
         exp_obj = trimesh.exchange.obj.export_obj(mesh)
@@ -244,8 +246,13 @@ class RobotModel:
 
 class Robot(MeshCatObject):
     def __init__(
-            self, vis, name, model:RobotModel, color="white", alpha=1., show_surface_points=False):
+            self, 
+            vis, name, 
+            model:RobotModel, color="white", alpha=1., 
+            visualized_mesh:str="visual", show_surface_points=False):
         self.model = model
+        self.name = name
+        self.visualized_mesh = visualized_mesh # visual or collision
         self.fk_to_mat = jax.jit(jax.vmap(lambda wxyzxyz: SE3(wxyzxyz).as_matrix()))
         self.full_idx = np.arange(self.model.dof)
         self.free_idx = self.full_idx.copy()
@@ -266,8 +273,9 @@ class Robot(MeshCatObject):
         for link in self.model.links.values():
             # for now, only supports visual mesh
             if link.has_mesh:
-                obj = link.get_meshcat_obj("visual")
-                self.handle["visual"][link.name].set_object(obj, material)
+                obj = link.get_meshcat_obj(self.visualized_mesh)
+                link_name = f"{self.name}_{link.name}"
+                self.handle["visual"][link_name].set_object(obj, material)
 
     def show(self):
         Ts = self.fk_to_mat(self.model.fk_fn(self.q))
@@ -275,7 +283,8 @@ class Robot(MeshCatObject):
         i = 0
         for i, link in enumerate(self.model.links.values()):
             if not link.has_mesh: continue
-            self.handle["visual"][link.name].set_transform(Ts[i])
+            link_name = f"{self.name}_{link.name}"
+            self.handle["visual"][link_name].set_transform(Ts[i])
             i += 1
         self.handle["surface_points"].delete()
         if self.show_surface_points:
