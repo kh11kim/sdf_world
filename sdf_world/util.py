@@ -4,6 +4,8 @@ from jaxlie import SE3, SO3
 from jax import Array
 import jax.numpy as jnp
 import matplotlib
+from typing import *
+from functools import partial
 from matplotlib.colors import rgb2hex, hex2color
 
 class Colors:
@@ -140,9 +142,20 @@ def to_cartesian_coord(r_theta_phi):
 def point_to_T(p):
     return np.array(SE3.from_translation(p).as_matrix(), dtype=float)
 
-def value_and_jacrev(f, x, state):
-    y, pullback = jax.vjp(f, x, state)
-    basis = jnp.eye(y.size, dtype=y.dtype)
-    jac = jax.vmap(pullback)(basis)
-    return y, jac[0]
 
+from jax._src import linear_util as lu
+from jax._src.api_util import argnums_partial
+from jax._src.api import _std_basis, _jacfwd_unravel, _jvp
+
+def value_and_jacfwd(fun, argnums):
+    def jacfun(*args, **kwargs):
+        f = lu.wrap_init(fun, kwargs)
+        f_partial, dyn_args = argnums_partial(f, argnums, args,
+                                            require_static_args_hashable=False)
+        pushfwd: Callable = partial(_jvp, f_partial, dyn_args)
+        y, jac = jax.vmap(pushfwd, out_axes=(None, -1))(_std_basis(dyn_args))
+        
+        example_args = dyn_args[0] if isinstance(argnums, int) else dyn_args
+        jac_tree = jax.tree_map(partial(_jacfwd_unravel, example_args), y, jac)
+        return y, jac_tree
+    return jacfun

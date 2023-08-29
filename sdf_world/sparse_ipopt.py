@@ -1,64 +1,70 @@
-import cyipopt
-import jax
-import jax.numpy as jnp
 import numpy as np
-from typing import *
+import jax.numpy as jnp
+import jax
+from jax import Array
+import cyipopt
 from dataclasses import dataclass, field
+from typing import *
 
 @dataclass
 class Variable:
-    index: int
-    offset: int
     name: str
-    dim: int
+    coord: np.ndarray
     lb: np.ndarray
     ub: np.ndarray
+    
+    @property
+    def dim(self): return len(self.coord)
 
 @dataclass
 class Parameter:
     name: str
+    coord: np.ndarray
+    dim: int
     value: np.ndarray
 
-@dataclass
-class Objective:
-    fn_info: "Function"
-    inputs: List[Union[Variable,Parameter]]
+    @property
+    def lb(self): return np.full(self.dim, -np.inf)
+    @property
+    def ub(self): return np.full(self.dim, np.inf)
 
 @dataclass
 class Constraint:
     name: str
-    dim: int
-    inputs: List[Union[Variable,Parameter]]
+    coord: np.ndarray
+    inputs: List[Variable]
+    fn: "Function"
     lb: np.ndarray
     ub: np.ndarray
-    fn_info: "Function"
-    index: Optional[int] = field(default_factory=lambda :None)
-    offset: Optional[int] = field(default_factory=lambda :None)
+    no_deriv_names: List[str]
+    jac_indices: np.ndarray
+
+    @property
+    def dim(self): return len(self.coord)
 
 @dataclass
 class Function:
     name: str
     in_dims: List[int]
     out_dim: int
-    fn: Callable
-    jacs: List[Callable]
+    eval_fn: Callable
+    jac_fn: Callable
+    jac_out_argnums: Iterable
+    custom_jac_indices: Optional[List[np.ndarray]]
     constraints: List[Constraint] = field(default_factory=list)
 
-
-class SparseIPOPTBuilder:
-    def __init__(self):
-        self.x_info: Dict[str,Variable] = {}
-        self.fn_info: Dict[str,Function] = {}
+class SparseIPOPT():
+    def __init__(self, check_fn=False):
+        self.x_info: Dict[str, Union[Variable, Parameter]] = {}
         self.c_info: Dict[str,Constraint] = {}
-        self.obj_info: Optional[Objective] = None
-        self.param_info: Dict[str, Parameter] = {}
-        self.cfn_list: List[Function] = []
-        self.xidx = 0
-        self.x_offset = 0
-    
-    @property
-    def input_info(self):
-        return {**self.x_info, **self.param_info}
+        self.fn_info: Dict[str,Function] = {}
+        self.obj_info: Dict = {}
+        self.param_info: Dict[str, Array] = {}
+        self.check_fn = check_fn
+
+        self.x_idx, self.c_idx = 0, 0
+        self.param_info: Dict[str, np.ndarray] = {}
+
     @property
     def xdim(self):
         return sum([x.dim for x in self.x_info.values()])
@@ -66,236 +72,251 @@ class SparseIPOPTBuilder:
     def cdim(self):
         return sum([c.dim for c in self.c_info.values()])
     @property
-    def xnames(self):
-        return [x.name for x in self.x_info.values()]
-    @property
-    def xoffsets(self):
-        return [x.offset for x in self.x_info.values()]
-    @property
-    def xdims(self):
-        return [x.dim for x in self.x_info.values()]
-    @property
-    def param_dict(self):
-        return {param.name:param.value for param in self.param_info.values()}
+    def input_info(self):
+        return {**self.x_info, **self.param_info}
     
-    def as_vector(self, val, dim):
-        if isinstance(val, float):
-            return np.full(dim, val)
-        assert len(val) == dim
-        return val
+    def print_x_info(self):
+        print({var.name: var.dim for var in self.x_info.values()})
     
+    def split_solution(self, sol):
+        return {var.name:sol[var.coord] for var in self.x_info.values()}
+
     def add_variable(self, name, dim, lb=-np.inf, ub=np.inf):
         assert name not in self.x_info
         assert isinstance(lb, float) or len(lb) == dim
         assert isinstance(ub, float) or len(ub) == dim
-        if isinstance(lb, float):
-            lb = np.full(dim, lb)
-        if isinstance(ub, float):
-            ub = np.full(dim, ub)
-        var = Variable(
-            self.xidx, self.x_offset,
-            name, dim, lb, ub)
-        self.x_info[name] = var
-        self.xidx += 1
-        self.x_offset += dim
-    
-    def add_parameter(self, name, value):
-        self.param_info[name] = Parameter(name, np.array(value))
-    
-    def register_fn(self, name, in_dims, out_dim, fn, jacs):
-        assert len(in_dims) == len(jacs), "The number of jacobian function and input variables should be the same."
-        self.fn_info[name] = Function(name, in_dims, out_dim, fn, jacs)
-    
-    def add_objective(self, input_x_names, fn_name):
-        fn = self.fn_info[fn_name]
-        assert fn.out_dim == 1
-        inputs = [self.input_info[x_name] for x_name in input_x_names]
-        self.obj_info = Objective(fn, inputs)
 
-    def add_constr(self, name, input_x_names, cfn_name, lb, ub):
+        if isinstance(lb, float): lb = np.full(dim, lb)
+        if isinstance(ub, float): ub = np.full(dim, ub)
+
+        coord = np.arange(self.x_idx, self.x_idx+dim)
+        self.x_info[name] = Variable(
+            name, coord, lb, ub)
+        
+        self.x_idx += dim
+    
+    def add_parameter(self, name, dim, value=None):
+        assert name not in self.param_info
+        #TODO: name also should not be in "variable"
+        if value is None:
+            value = np.zeros(dim)
+        coord = np.arange(self.x_idx, self.x_idx+dim)
+        self.x_info[name] = Parameter(name, coord, dim, value)
+        self.x_idx += dim
+    
+    def change_parameter(self, name, value):
+        assert self.x_info[name].dim == len(value)
+        self.x_info[name].value = value
+    
+    def get_init_value(self, x_init_dict:Dict):
+        for var in self.x_info.values():
+            if var.name in x_init_dict:
+                continue
+            elif isinstance(var, Parameter):
+                x_init_dict[var.name] = var.value
+            elif var.name not in x_init_dict:
+                raise ValueError(f"{var.name} : Not in x_init_dict")
+        return np.hstack([x_init_dict[varname] for varname in self.x_info])
+
+    def set_objective(self, fn_name, input_x_names):
+        self.obj_info["fn"] = self.fn_info[fn_name]
+        self.obj_info["inputs"] = [self.x_info[name] for name in input_x_names]
+    
+    def set_debug_callback(self, debug_callback:Callable):
+        self.obj_info["debug_cb"] = debug_callback
+
+    def set_constr(self, name, cfn_name, input_x_names, lb, ub, no_deriv_names=[]):
+        c_fn = self.fn_info[cfn_name]
+        cdim = c_fn.out_dim
         assert name not in self.c_info
-        cfn = self.fn_info[cfn_name]
-        assert isinstance(lb, float) or len(lb) == cfn.out_dim
-        assert isinstance(ub, float) or len(ub) == cfn.out_dim
-        if isinstance(lb, float):
-            lb = np.full(cfn.out_dim, lb)
-        if isinstance(ub, float):
-            ub = np.full(cfn.out_dim, ub)
-        
-        inputs = [self.input_info[x_name] for x_name in input_x_names]
-        constr = Constraint(name, cfn.out_dim , inputs, lb, ub, cfn)
-        self.c_info[name] = constr
-        self.cfn_list.append(cfn)
-        cfn.constraints.append(constr)
-        # -> we should reindex the constraints: first clustering cfns, then constraints
-    
-    def get_objective_fn(self):
-        ndo = (self.xnames, self.xdims, self.xoffsets)
-        def objective(x):
-            input_dict = {name:x[offset:offset+dim] 
-                                for name, dim, offset in zip(*ndo)}
-            input_dict.update(self.param_dict)
-            input_names = [x.name for x in self.obj_info.inputs]
-            inputs = [input_dict[name] for name in input_names]
-            return self.obj_info.fn_info.fn(*inputs)
-        if isinstance(self.obj_info, Objective):
-            return objective
-        #if obj not set, return dummy
-        return lambda x: 0.
-    
-    def get_gradient_fn(self):
-        zip_x_ndo = zip(self.xnames, self.xdims, self.xoffsets)
-        grad_dict = {x.name:np.zeros(x.dim) for x in self.x_list}
+        assert isinstance(lb, float) or len(lb) == cdim
+        assert isinstance(ub, float) or len(ub) == cdim
+        if isinstance(lb, float): lb = np.full(cdim, lb)
+        if isinstance(ub, float): ub = np.full(cdim, ub)
 
-        def gradient(x):
-            input_dict = {name:x[offset:offset+dim] 
-                                for name, dim, offset in zip_x_ndo}
-            input_dict.update(self.param_dict)
-            input_names = [x.name for x in self.obj_info.inputs]
-            inputs = [input_dict[name] for name in input_names]
-            #inputs = [x.name for x in self.obj_info.inputs]
-            for i, xname in enumerate(input_names):
-                grad_fn = self.obj_info.fn_info.jacs[i]
-                if grad_fn is None: continue
-                grad = grad_fn(*inputs)
-                grad_dict[xname] = grad
-            return jnp.hstack(list(grad_dict.values()))
+        vars = [self.x_info[name] for name in input_x_names]
+        c_coord = np.arange(self.c_idx, self.c_idx+cdim)
+
+        jac_indices = []
+        for i, var in enumerate(vars):
+            if var.name in no_deriv_names: continue
+            if isinstance(var, Parameter): continue
+            
+            if c_fn.custom_jac_indices is not None:
+                row, col = c_fn.custom_jac_indices[i]
+            else:
+                row, col = np.indices((cdim, var.dim)).reshape(2, -1)
+            row_offset, col_offset = c_coord[0], var.coord[0] # offset
+            jac_indices.append(np.vstack([row+row_offset, col+col_offset]))
+
+        self.c_info[name] = Constraint(
+            name, c_coord, vars, 
+            c_fn, lb, ub,
+            no_deriv_names, jac_indices)
+        c_fn.constraints.append(self.c_info[name])
+        self.c_idx += cdim
+
+    def register_fn(
+            self, 
+            name, in_dims, out_dim, 
+            eval_fn, jac_fn, 
+            jac_out_argnums=None,
+            custom_jac_indices=None):
+        xdummies = [jnp.zeros(dim) for dim in in_dims]
+        if self.check_fn:
+            assert eval_fn(*xdummies).size == out_dim
+            assert len(jac_fn(*xdummies)) == len(in_dims)
         
-        if isinstance(self.obj_info, Objective):
-            return gradient
-        #if obj not set, return dummy
-        return lambda x: np.zeros(self.xdim)
+        if jac_out_argnums is None:
+            jac_out_argnums = np.arange(len(in_dims))
+        
+        if custom_jac_indices is not None:
+            assert len(custom_jac_indices) == len(jac_out_argnums)
+        self.fn_info[name] = Function(
+            name, in_dims, out_dim, eval_fn, jac_fn, 
+            jac_out_argnums, custom_jac_indices)
     
-    def get_constr_fn(self):
-        zip_x_ndo = zip(self.xnames, self.xdims, self.xoffsets)
-        # constraint evaluation
+    def get_objective_fn(self, compile=True):
+        no_obj = False
+        if "fn" not in self.obj_info: 
+            objective = lambda x: 0.
+            no_obj = True
+        else:
+            def objective(x):        
+                xs = {var.name:x[var.coord] for var in self.x_info.values()}
+                fn_input = [xs[var.name] for var in self.obj_info["inputs"]]    
+                val = self.obj_info["fn"].eval_fn(*fn_input)
+                return val
+        
+        if "debug_cb" in self.obj_info:
+            def objective_debug(x):
+                xs = {var.name:x[var.coord] for var in self.x_info.values()}
+                self.obj_info["debug_cb"](xs)    
+                return objective(x)
+            return objective_debug
+        elif compile and not no_obj:
+            return jax.jit(objective)
+        return objective
+    
+    def get_gradient_fn(self, compile=True):
+        no_obj = False
+        if "fn" not in self.obj_info: 
+            gradient = lambda x: np.zeros(self.xdim)
+            no_obj = True
+        else:
+            grad_value_dict = {var.name: np.zeros(var.dim) for var in self.x_info.values()}
+            def gradient(x):
+                xs = {var.name:x[var.coord] for var in self.x_info.values()}
+                fn_input = [xs[var.name] for var in self.obj_info["inputs"]]    
+                grads = self.obj_info["fn"].jac_fn(*fn_input)
+                for var, grad in zip(self.obj_info['inputs'], grads):
+                    grad_value_dict[var.name] = grad
+                return jnp.hstack(grad_value_dict.values())
+        if compile and not no_obj:
+            return jax.jit(gradient)
+        return gradient      
+    
+    def get_constraint_fn(self, compile=True):
         def constraints(x):
-            input_dict = {name:x[offset:offset+dim] 
-                                for name, dim, offset in zip_x_ndo}
-            input_dict.update(self.param_dict)
-
-            cvals = []
-            for cfn in self.cfn_list:
-                input_batch = []
-                num_inputs = len(cfn.in_dims)
-                for i in range(num_inputs):
-                    inputs = []
-                    for constr in cfn.constraints:
-                        input_name = constr.inputs[i].name
-                        inputs.append(input_dict[input_name])
-                    input_batch.append(jnp.vstack(inputs))
-                cval = jax.vmap(cfn.fn)(*input_batch)
-                cvals.append(cval.flatten())
-            return jnp.hstack(cvals, dtype=float)
+            xs = {var.name:x[var.coord] for var in self.x_info.values()}
+            result = []
+            for constr in self.c_info.values():
+                fn_input = [xs[var.name] for var in constr.inputs]    
+                out = constr.fn.eval_fn(*fn_input)
+                result.append(out)
+            return jnp.hstack(result)
+        if compile:
+            return jax.jit(constraints)
         return constraints
-
-    def get_jacobian_fn(self):
-        zip_x_ndo = zip(self.xnames, self.xdims, self.xoffsets)
-        # jacobian evaluation
-        def jacobian(x):
-            input_dict = {name:x[offset:offset+dim] 
-                                for name, dim, offset in zip_x_ndo}
-            input_dict.update(self.param_dict)
-
-            jac_vals = []
-            for cfn in self.cfn_list:
-                input_batch = []
-                num_inputs = len(cfn.in_dims)
-                #prepare input batches
-                param_masks = []
-                for i in range(num_inputs):
-                    inputs = []
-                    param_mask = []
-                    for j, constr in enumerate(cfn.constraints):
-                        if isinstance(constr.inputs[i], Variable):
-                            param_mask.append(j)
-                        input_name = constr.inputs[i].name
-                        inputs.append(input_dict[input_name])
-                    param_masks.append(np.array(param_mask, dtype=int))
-                    input_batch.append(jnp.vstack(inputs))
-                
-                for i in range(num_inputs):
-                    jac_fn = cfn.jacs[i]
-                    if jac_fn is None: continue
-                    param_mask = param_masks[i]
-                    jac_val = jax.vmap(jac_fn)(*input_batch)[param_mask].flatten()
-                    jac_vals.append(jac_val)
-            return jnp.hstack(jac_vals, dtype=float)
-        return jacobian
     
-    def freeze(self):
-        #reindexing var/constraints
-        self.x_list = [x for x in self.x_info.values()]
-        cidx = 0
-        c_offset = 0
-        self.c_list = []
-        for cfn in self.fn_info.values():
-            for constr in cfn.constraints:
-                constr.index = cidx
-                constr.offset = c_offset
-                cidx += 1
-                c_offset += constr.dim
-                self.c_list.append(constr)
-        
-        #set jac structure
-        jac_rows, jac_cols = [], []
-        for cfn in self.fn_info.values():
-            num_input = len(cfn.in_dims)
-            for i in range(num_input):
-                for constr in cfn.constraints:
-                    if isinstance(constr.inputs[i], Parameter): continue
-                    xdim = constr.fn_info.in_dims[i]
-                    cdim = constr.dim
-                    row, col = np.indices((cdim, xdim))
-                    jac_rows.append(row.flatten()+constr.offset)
-                    jac_cols.append(col.flatten()+constr.inputs[i].offset)
-        self.jac_rows, self.jac_cols = np.hstack(jac_rows), np.hstack(jac_cols)
+    def get_jacobian_fn(self, compile=True):
+        def jacobian(x):
+            xs = {var.name:x[var.coord] for var in self.x_info.values()}
+            result = []
+            for constr in self.c_info.values():
+                fn_input = [xs[var.name] for var in constr.inputs]    
+                jacs = constr.fn.jac_fn(*fn_input)
+                
+                for i in constr.fn.jac_out_argnums:
+                    var = constr.inputs[i]
+                    #for i, var in enumerate(constr.inputs):
+                    if var.name in constr.no_deriv_names: continue
+                    elif isinstance(var, Parameter): continue
+                    result.append(jacs[i].flatten())
+            return jnp.hstack(result)
+        if compile:
+            return jax.jit(jacobian)
+        return jacobian
+
+    
+    def get_jacobian_structure(self):
+        rows, cols = [], []
+        for constr in self.c_info.values():
+            for jac_idx in constr.jac_indices:
+                if jac_idx is None: continue
+                rows.append(jac_idx[0])
+                cols.append(jac_idx[1])
+        rows = np.hstack(rows)
+        cols = np.hstack(cols)
+        return rows, cols
 
     def print_sparsity(self):
-        jac_structure = np.full((self.cdim, self.xdim), -1, dtype=int)
-        jac_structure[self.jac_rows, self.jac_cols] = np.arange(len(self.jac_rows))
-        print("\nSparsity pattern:")
-        for row in jac_structure:
+        row, col = self.get_jacobian_structure()
+        jac_struct = np.full((self.cdim, self.xdim), -1, dtype=int)
+        jac_struct[row, col] = 1
+        for row in jac_struct:
             row_str = ""
             for val in row:
-                if val >= 10:
-                    row_str += f"{val} "
-                elif val == -1:
-                    row_str += "-- "
-                else:
-                    row_str += f"0{val} "
+                if val == -1: row_str += "-"
+                else: row_str += f"o"
             print(row_str)
     
-    def build(self, compile_obj=False):
+    def build(self, compile=True):
         lb = np.hstack([x.lb for x in self.x_info.values()])
         ub = np.hstack([x.ub for x in self.x_info.values()])
-        cl = np.hstack([c.lb for c in self.c_list])
-        cu = np.hstack([c.ub for c in self.c_list])
         fns = {
-            "objective": self.get_objective_fn(),
-            "gradient": self.get_gradient_fn(),
-            "constraints": self.get_constr_fn(),
-            "jacobian": self.get_jacobian_fn(),
-        }
+            "objective": self.get_objective_fn(compile),
+            "gradient": self.get_gradient_fn(compile)}
+        if self.cdim != 0:
+            cl = np.hstack([c.lb for c in self.c_info.values()])
+            cu = np.hstack([c.ub for c in self.c_info.values()])
+            row, col = self.get_jacobian_structure()
+            jac_struct_fn = lambda : (row, col)
+            fns["constraints"] = self.get_constraint_fn(compile)
+            fns["jacobian"] = self.get_jacobian_fn(compile)
 
         class Prob:
             pass
         prob = Prob()
         xdummy = jnp.zeros(self.xdim)
         for fn_name, fn in fns.items():
-            if (not compile_obj) and (fn_name == "objective"):
-                setattr(prob, fn_name, fn)
-            else:
-                setattr(prob, fn_name, jax.jit(fn).lower(xdummy).compile())
-        jac_struct_fn = lambda : (self.jac_rows, self.jac_cols)
-        setattr(prob, "jacobianstructure", jac_struct_fn)
-            
-        ipopt = cyipopt.Problem(
-            n=self.xdim, m=self.cdim,
-            problem_obj=prob,
-            lb=lb, ub=ub,
-            cl=cl, cu=cu
-        )
-        self.print_sparsity()
-        return ipopt
+            print(f"compiling {fn_name} ...")
+            fn(xdummy)
+            setattr(prob, fn_name, fn)
         
+        
+        if self.cdim != 0:
+            setattr(prob, "jacobianstructure", jac_struct_fn)
+            ipopt = cyipopt.Problem(
+                n=self.xdim, m=self.cdim,
+                problem_obj=prob,
+                lb=lb, ub=ub, cl=cl, cu=cu
+            )
+            self.print_sparsity()
+        else:
+            ipopt = cyipopt.Problem(
+                n=self.xdim, m=self.cdim,
+                problem_obj=prob,
+                lb=lb, ub=ub)
+            print("no constraints")
+            
+        # default option
+        ipopt.add_option("acceptable_iter", 2)
+        ipopt.add_option("acceptable_tol", np.inf) #release
+        ipopt.add_option("acceptable_obj_change_tol", 0.1)
+        ipopt.add_option("acceptable_constr_viol_tol", 1.)
+        #ipopt.add_option("acceptable_dual_inf_tol", 1.) 
+        ipopt.add_option('mu_strategy', 'adaptive')
+        ipopt.add_option("print_level", 1)
+        
+        return ipopt

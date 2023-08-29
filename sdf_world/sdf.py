@@ -50,7 +50,7 @@ class SDFBox(SDF):
 
 #@jdc.pytree_dataclass
 class SDFContainer:
-    def __init__(self, sdfs:List[SDF], safe_dist:float):
+    def __init__(self, sdfs:List[SDF], safe_dist:float=None):
         self.sdfs = sdfs
         self.safe_dist = safe_dist
     

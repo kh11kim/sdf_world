@@ -43,10 +43,10 @@ class SDFWorld:
 
 
 class MeshCatObject:
-    def __init__(self, vis, name, visualize=True):
-        self.vis = vis
+    def __init__(self, parent, name, visualize=True):
+        self.parent = parent
         self.name = name
-        self.handle = self.vis[name]
+        self.handle = self.parent[name]
         self.handle.delete()
         self.pose: SE3 = SE3.identity()
         self.visualize = visualize
@@ -80,12 +80,12 @@ class MeshCatObject:
         self.set_pose(self.pose)
 
 class Box(MeshCatObject, SDFBox):
-    def __init__(self, vis, name, lengths, color="white", alpha=1., visualize=True):
+    def __init__(self, parent, name, lengths, color="white", alpha=1., visualize=True):
         assert len(lengths) == 3
         self.lengths = np.array(lengths)
         self.color = color
         self.alpha = alpha
-        super().__init__(vis=vis, name=name, visualize=visualize)
+        super().__init__(parent=parent, name=name, visualize=visualize)
 
     def load(self):
         obj = g.Box(self.lengths)
@@ -100,11 +100,11 @@ class Box(MeshCatObject, SDFBox):
         return self._distance(point, self.pose, self.lengths/2)
 
 class Sphere(MeshCatObject, SDFSphere):
-    def __init__(self, vis, name, r, color="red", alpha=1., visualize=True):
+    def __init__(self, parent, name, r, color="red", alpha=1., visualize=True):
         self.r = r
         self.color = color
         self.alpha = alpha
-        super().__init__(vis=vis, name=name, visualize=visualize)
+        super().__init__(parent=parent, name=name, visualize=visualize)
 
     def load(self):
         obj = g.Sphere(self.r)
@@ -122,12 +122,12 @@ class Sphere(MeshCatObject, SDFSphere):
         return d
 
 class Cylinder(MeshCatObject):
-    def __init__(self, vis, name, h, r, color="red", alpha=1., visualize=True):
+    def __init__(self, parent, name, h, r, color="red", alpha=1., visualize=True):
         self.h = h
         self.r = r
         self.color = color
         self.alpha = alpha
-        super().__init__(vis=vis, name=name, visualize=visualize)
+        super().__init__(parent=parent, name=name, visualize=visualize)
 
     def load(self):
         obj = g.Cylinder(height=self.h, radius=self.r)
@@ -136,13 +136,13 @@ class Cylinder(MeshCatObject):
     
 
 class Capsule(MeshCatObject):
-    def __init__(self, vis, name, p1, p2, r, color="red", alpha=1., visualize=True):
+    def __init__(self, parent, name, p1, p2, r, color="red", alpha=1., visualize=True):
         self.p1 = p1
         self.p2 = p2
         self.r = r
         self.color = color
         self.alpha = alpha
-        super().__init__(vis=vis, name=name, visualize=visualize)
+        super().__init__(parent=parent, name=name, visualize=visualize)
 
     def load(self):
         normalize = lambda v: v/jnp.linalg.norm(v)
@@ -169,29 +169,36 @@ class Capsule(MeshCatObject):
 
 
 class Mesh(MeshCatObject):
-    def __init__(self, vis, name, path, color="white", alpha=1.):
+    def __init__(self, parent, name, path, color="white", alpha=1., scale=1.):
         self.path = path
-        self.mesh = trimesh.load(path)
         self.color = color
         self.alpha = alpha
-        if isinstance(self.mesh, trimesh.Scene):
-            self.mesh = self.mesh.dump(True)
-        super().__init__(vis=vis, name=name)
+        self.scale = scale
+        super().__init__(parent=parent, name=name)
+
+    def apply_scaling(self):
+        scaling_mat = np.eye(4)
+        scaling_mat[:3, :3] *= self.scale
+        self.mesh.apply_transform(scaling_mat)
 
     def load(self):
+        self.mesh = trimesh.load(self.path)
+        if isinstance(self.mesh, trimesh.Scene):
+            self.mesh = self.mesh.dump(True)
+        self.apply_scaling()
         exp_obj = trimesh.exchange.obj.export_obj(self.mesh)
         obj = g.ObjMeshGeometry.from_stream(
             trimesh.util.wrap_as_stream(exp_obj))
         material = g.MeshLambertMaterial(
             color=Colors.read(self.color), opacity=self.alpha)
-        self.vis[self.name].set_object(obj, material)
+        self.parent[self.name].set_object(obj, material)
 
 
 class Frame(MeshCatObject):
-    def __init__(self, vis, name, length=0.1, r=0.02):
+    def __init__(self, parent, name, length=0.1, r=0.02):
         self.length = length
         self.r = r
-        super().__init__(vis=vis, name=name, visualize=True)
+        super().__init__(parent=parent, name=name, visualize=True)
     
     def load(self):
         axes = ["x", "y", "z"]
@@ -207,13 +214,13 @@ class Frame(MeshCatObject):
             self.handle[axes[i]].set_transform(mat_from_translate(tf_mat[i]))
 
 class PointCloud(MeshCatObject):
-    def __init__(self, vis, name, points, size=0.05, color="white"):
+    def __init__(self, parent, name, points, size=0.05, color="white"):
         """points(n, 3)"""
         # length = points.shape[0]
         self.points = np.array(points)
         self.color = color    
         self.size = size
-        super().__init__(vis=vis, name=name, visualize=True)
+        super().__init__(parent=parent, name=name, visualize=True)
 
     def get_color(self, length):
         if isinstance(self.color, str):
@@ -229,14 +236,14 @@ class PointCloud(MeshCatObject):
         self.handle["pc"].set_object(obj, material)
 
 class DottedLine(MeshCatObject):
-    def __init__(self, vis, name, points, point_size=0.01, color:str="red"):
+    def __init__(self, parent, name, points, point_size=0.01, color:str="red"):
         """points(n, 3)"""
         length = points.shape[0]
         self.points = np.array(points)
         self.color = color
         #self.colors = np.tile(Colors.read(color, return_rgb=True), length).reshape(-1, 3)
         self.size = point_size
-        super().__init__(vis=vis, name=name, visualize=True)
+        super().__init__(parent=parent, name=name, visualize=True)
 
     def get_color(self, length):
         if isinstance(self.color, str):
