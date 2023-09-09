@@ -5,6 +5,7 @@ from typing import Callable, Sequence
 import orbax
 from flax.training import orbax_utils
 from flax.training.train_state import TrainState
+from jaxlie import SE3, SO3
 
 class LipLinear(nn.Module):
     """A linear layer with Lipschitz regularization."""
@@ -158,3 +159,29 @@ class GraspNet(nn.Module):
         x = nn.relu(x)
         logit = nn.Dense(features=self.out_dim)(x)
         return logit
+
+def load_grasp_fn(model_path):
+    orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+    restored_param = orbax_checkpointer.restore(model_path)
+    hidden_dim, out_dim = restored_param['hidden_dim'], restored_param['out_dim']
+    print(f"hidden_dim:{hidden_dim}, out_dim:{out_dim}")
+    grasp_net = GraspNet(hidden_dim, out_dim)
+    grasp_fn = lambda x: grasp_net.apply(restored_param["params"], x)
+    def grasp_reconst(grasp):
+        rot = SO3(grasp_fn(grasp)[1:5]).normalize()
+        trans = grasp/restored_param["scale_to_norm"]
+        return SE3.from_rotation_and_translation(rot, trans)
+    def grasp_embedding(grasp_point):
+        grasp = grasp_point * restored_param["scale_to_norm"]
+        return grasp
+    return grasp_fn, grasp_reconst, grasp_embedding
+
+def load_manip_fn(model_path, robot_base_pose:SE3, hidden_dim=64):
+    orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+    restored_param = orbax_checkpointer.restore(model_path)
+    manip_net = ManipNet(hidden_dim)
+    def manip_fn(pose):
+        grasp_pose_robot = robot_base_pose.inverse() @ SE3(pose)
+        x = grasp_pose_robot.parameters()
+        return manip_net.apply(restored_param["params"], x)[0]
+    return manip_fn

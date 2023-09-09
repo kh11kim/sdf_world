@@ -174,13 +174,14 @@ class ArmGripper:
         ee_pose = SE3(self.arm.model.fk_links(self.arm.q)[-1])
         self.gripper.grip(base_pose=ee_pose)
         self.pcs = []
+        self.hand_pc = self.gripper.get_hand_pc_wrt_tool_pose(10)
         for i, mesh in enumerate(self.arm.meshes.values()):
             if i == 0: continue
             if mesh is None:
                 self.pcs.append(None)
             else:
                 self.pcs.append(farthest_point_sampling(mesh.mesh.sample(100), 10))
-        self.pcs.append(self.gripper.hand_pc)
+        self.pcs.append(self.hand_pc)
         
     def set_joint_angles(self, q):
         fks = self.fk_fn(q)
@@ -192,15 +193,13 @@ class ArmGripper:
         self.arm.set_base_pose(pose)
         self.set_joint_angles(self.arm.q)
     
-
-    
     def get_fk_ee_fn(self):
         return self.arm.model.get_fk_ee_fn(self.gripper.tool_pose_offset)
 
     def get_robot_pc_fn(self, robot_pose:SE3=SE3.identity()):
         def get_robot_pc(q):
             fks = self.fk_fn(q)
-            fks = jnp.vstack([SE3.identity().parameters(), fks])
+            # fks = jnp.vstack([SE3.identity().parameters(), fks]) #include base
             
             assigned_pcs = []
             for i in range(len(fks)):
@@ -222,7 +221,7 @@ def get_predefined_robot(parent, robot_name):
         kinova = Arm(handle, "gen3", gen3_model, alpha=0.5)
         
         tool_pose_offset= SE3.from_rotation_and_translation(
-            SO3.from_z_radians(jnp.pi/2), jnp.array([0,0,0.14]))
+            SO3.from_z_radians(jnp.pi/2), jnp.array([0,0,0.135]))
         hande = Gripper(handle, "hande", hande_model, tool_pose_offset,
                         max_width=0.05, scale=0.001)
         robot = ArmGripper(kinova, hande)
